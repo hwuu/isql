@@ -12,30 +12,12 @@ from lxml import etree
 
 #
 
-class Paper:
-    #
-    def __init__(self):
-        #
-        self.key = ""
-        self.mdate = ""
-        self.type = ""
-        self.title = ""
-        self.authors = ""
-        self.booktitle = ""
-        self.year = ""
-        self.volume = ""
-        self.number = ""
-        self.pages = ""
-        self.ee = ""
-        self.url = ""
-
-#
-
 if __name__ == "__main__":
     #
     n = 0
     s_tag = set(["inproceedings", "incollection", "article"])
     v_column_name = [
+            "id",
             "key", "mdate", "type",
             "title", "authors",
             "booktitle", "year", "volume",
@@ -61,7 +43,9 @@ if __name__ == "__main__":
             e = e.getparent()
             level += 1
         if level == 2 and element.tag in s_tag:
+            n += 1
             p = {}
+            p["id"] = str(n)
             p["type"] = element.tag
             for [tag, text] in element.items():
                 if tag in s_column_name:
@@ -89,7 +73,6 @@ if __name__ == "__main__":
                         d_max_len[column_name] < len(text):
                     d_max_len[column_name] = len(text)
             csv_writer.writerow(row)
-            n += 1
             if n % 10000 == 0:
                 print n
         #
