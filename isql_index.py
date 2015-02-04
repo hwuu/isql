@@ -1,6 +1,41 @@
 #
 # Hao, created: 01/29/2015, modified: 02/03/2015
 #
+# There are 5 index tables:
+#
+# 1. K (keywords):
+#
+#    kid  - keyword id
+#    str  - keyword string
+#
+# 2. P (prefixes):
+#
+#    v    - prefix
+#    h    - head of the prefix, i.e. v[:-1]
+#    lkid - lower bound of the kid range
+#    ukid - upper bound of the kid range
+#
+# 3. I (inverted index):
+#
+#    kid: keyword id
+#    rid: record id
+#
+# 4. S (similar prefixes):
+#
+#    w - input prefix
+#    m - max. edit distance
+#    v - similar prefix
+#    d - ed(w, v)
+#    p - the editing operation that converts w to v
+#        1: deletion, 2: match, 3: insertion, 4: substitution
+#    i - # of insertions
+#
+# 5. R (records of similar prefixes)
+#
+#    w - input prefix
+#    m - max. edit distance
+#    n - number of similar prefixes
+#
 
 import csv
 import os
@@ -22,7 +57,7 @@ def pull_data_file_from_ds(conn, env):
     #
     cursor = conn.cursor()
     #
-    # create data table 'D' in DB, and load data into it
+    # Create data table 'D' in DB, and load data into it.
     #
     try:
         sql = "drop table %s" % tbl_D
@@ -35,13 +70,13 @@ def pull_data_file_from_ds(conn, env):
           % (tbl_D, col_T_id, col_T_content, tbl_T, col_T_id)
     cursor.execute(sql)
     #
-    # export data table 'D' to the remote folder
+    # Export data table 'D' to the remote folder.
     #
     sql = "export %s as csv into '%s' with replace" \
           % (tbl_D, env["ds_folder"])
     cursor.execute(sql)
     #
-    # compress the data file in the remote folder
+    # Compress the data file in the remote folder.
     #
     cmd = "sudo ssh -i %s %s@%s "\
           "\"cd %s; tar -czvf %s.tar.gz ./export/%s/_D/%s/data\"" \
@@ -49,14 +84,14 @@ def pull_data_file_from_ds(conn, env):
              env["ds_folder"], tbl_D, env["db_schema"], tbl_D)
     run(cmd)
     #
-    # pull the compressed file to the local folder
+    # Pull the compressed file to the local folder.
     #
     cmd = "sudo scp -i %s %s@%s:%s/%s.tar.gz ." \
           % (env["ds_key_file"], env["ds_username"], env["ds_ip_addr"],
              env["ds_folder"], tbl_D)
     run(cmd)
     #
-    # uncompress and rename the file
+    # Uncompress and rename the file.
     #
     cmd = "tar -zxvf %s.tar.gz" % tbl_D
     run(cmd)
@@ -78,8 +113,7 @@ def create_index_files(conn, env):
     #
     cursor = conn.cursor()
     #
-    # Build the map of keyword-kid,
-    # and output the csv table of keywords.
+    # Build the map of keyword-kid and output 'K'.
     #
     m_keyword_kid = dict()
     #
@@ -116,13 +150,7 @@ def create_index_files(conn, env):
     csv_file_D.close()
     csv_file_K.close()
     #
-    # Build the map of prefix-lkid-ukid, and
-    # output the csv table of prefixes.
-    # Columns:
-    #     v    - prefix
-    #     h    - head of the prefix, i.e. prefix[:-1]
-    #     lkid - lower bound of the kid range
-    #     ukid - upper bound of the kid range
+    # Build the map of prefix-lkid-ukid and output 'P'.
     #
     m_prefix_lkid_ukid = dict()
     #
@@ -148,10 +176,7 @@ def create_index_files(conn, env):
     #
     csv_file_P.close()
     #
-    # Output the csv table of the inverted index
-    # Columns:
-    #     kid: keyword id
-    #     rid: record id
+    # Output 'I'.
     #
     csv_file_I = open(tbl_I + ".csv", "w")
     csv_writer_I = csv.writer(csv_file_I, delimiter=',',
@@ -183,21 +208,22 @@ def create_index_files(conn, env):
 def push_index_files_to_ds(conn, env):
     #
     tbl_T = env["db_table"]
-    tbl_D = "_" + tbl_T + "_D_"
     tbl_K = "_" + tbl_T + "_K_"
     tbl_P = "_" + tbl_T + "_P_"
     tbl_I = "_" + tbl_T + "_I_"
+    tbl_S = "_" + tbl_T + "_S_"
+    tbl_R = "_" + tbl_T + "_R_"
     idx_file_name = "_" + tbl_T + "_idx_.tar.gz"
     #
     cursor = conn.cursor()
     #
-    # Compress all csv files to a single index file
+    # Compress all csv files to a single index file.
     #
     cmd = "tar -czvf %s %s.csv %s.csv %s.csv" \
           % (idx_file_name, tbl_K, tbl_P, tbl_I)
     run(cmd)
     #
-    # Transfer the index file to the remote data server
+    # Transfer the index file to the remote data server.
     #
     cmd = "scp -i %s %s %s@%s:%s" \
           % (env["ds_key_file"], idx_file_name,
@@ -205,20 +231,25 @@ def push_index_files_to_ds(conn, env):
              env["ds_folder"])
     run(cmd)
     #
-    # Uncompress the index file from the remote data server
+    # Uncompress the index file from the remote data server.
     #
     cmd = "sudo ssh -i %s %s@%s \"cd %s; tar -zxvf %s\"" \
           % (env["ds_key_file"], env["ds_username"], env["ds_ip_addr"],
              env["ds_folder"], idx_file_name)
     run(cmd)
     #
-    # Create index tables in DB
+    # Create index tables in DB.
     #
     m_tbl_sql = {
             tbl_K: "create table %s (kid integer, str varchar(128))" % tbl_K,
             tbl_P: "create table %s (v varchar(128), h varchar(128), " \
                    "lkid integer, ukid integer)" % tbl_P,
-            tbl_I: "create table %s (kid integer, rid integer)" % tbl_I}
+            tbl_I: "create table %s (kid integer, rid integer)" % tbl_I,
+            tbl_S: "create table %s (id integer, " \
+                   "w varchar(128), m integer, v varchar(128), d integer, " \
+                   "p integer, i integer)" % tbl_S,
+            tbl_R: "create table %s (w varchar(128), " \
+                   "m integer, n integer)" % tbl_R}
     for t in m_tbl_sql:
         try:
             sql = "drop table %s" % t
@@ -227,7 +258,7 @@ def push_index_files_to_ds(conn, env):
             print e
         cursor.execute(m_tbl_sql[t])
     #
-    # Import index files into the index tables
+    # Import index files into the index tables.
     #
     v_tbl = [tbl_K, tbl_P, tbl_I]
     for t in v_tbl:
@@ -236,17 +267,21 @@ def push_index_files_to_ds(conn, env):
               "batch 10000" % (env["ds_folder"], t, t)
         cursor.execute(sql)
     #
-    # Create indexes for index tables
+    # Create indexes for index tables.
     #
     m_tbl_v_col = {
             tbl_K: ["kid", "str"],
             tbl_P: ["v", "h", "lkid", "ukid"],
-            tbl_I: ["kid", "rid"]}
+            tbl_I: ["kid", "rid"],
+            tbl_S: ["id", "w", "m", "v"],
+            tbl_R: ["w", "m"]}
     for t in m_tbl_v_col:
         for c in m_tbl_v_col[t]:
             sql = "create index _IDX_%s_%s_ on %s (%s)" % (t, c, t, c)
             cursor.execute(sql)
 
+#
+##
 #
 
 def run(cmd):
@@ -271,6 +306,8 @@ def clean(s):
     return re.sub(r"[^\w]+", "", s)
 
 #
+##
+#
 
 if __name__ == "__main__":
     #
@@ -294,12 +331,12 @@ if __name__ == "__main__":
     #
     start_time = time.time()
     print "Pulling data file ...",
-    pull_data_file_from_ds(conn, env)
+    #pull_data_file_from_ds(conn, env)
     print "Done. " + str(time.time() - start_time)
     #
     start_time = time.time()
     print "Creating index files ...",
-    create_index_files(conn, env)
+    #create_index_files(conn, env)
     print "Done. " + str(time.time() - start_time)
     #
     start_time = time.time()
