@@ -1,5 +1,5 @@
 #
-# Hao, created: 01/29/2015, modified: 02/03/2015
+# Hao, created: 01/29/2015, modified: 02/04/2015
 #
 # There are 5 index tables:
 #
@@ -187,8 +187,8 @@ def create_index_files(conn, env):
     csv_reader_D = csv.reader(csv_file_D)
     for row in csv_reader_D:
         n += 1
-        if n % 10000 == 0:
-            print "I: " + str(n) + " / " + str(n_row)
+        #if n % 10000 == 0:
+        #    print "I: " + str(n) + " / " + str(n_row)
         rid = int(row[0])
         v_word = split(row[1])
         for word in v_word:
@@ -279,6 +279,15 @@ def push_index_files_to_ds(conn, env):
         for c in m_tbl_v_col[t]:
             sql = "create index _IDX_%s_%s_ on %s (%s)" % (t, c, t, c)
             cursor.execute(sql)
+    #
+    # Create id sequence for table 'S'.
+    #
+    try:
+        sql = "create sequence _SEQ_%s_id_ " \
+              "minvalue 0 start with 0" % tbl_S
+        cursor.execute(sql)
+    except Exception , e:
+        print e
 
 #
 ##

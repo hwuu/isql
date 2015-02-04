@@ -1,5 +1,5 @@
 #
-# Hao, created: 01/29/2015, modified: 02/03/2015
+# Hao, created: 01/29/2015, modified: 02/04/2015
 #
 
 import re
@@ -10,6 +10,11 @@ import pyodbc
 
 def exact_search(conn, env, query):
     #
+    tbl_T = env["db_table"]
+    col_T_id = env["db_id_column"]
+    tbl_P = "_" + tbl_T + "_P_"
+    tbl_I = "_" + tbl_T + "_I_"
+    #
     sql = ""
     v_prefix = split(query)
     for prefix in v_prefix:
@@ -18,24 +23,32 @@ def exact_search(conn, env, query):
             continue
         if sql != "":
             sql += "intersect"
-        sql += """
-            select T.* from _P_, _I_, %s as T
-            where  _P_.v = '%s' and
-                   _P_.lkid <= _I_.kid  and
-                   _I_.kid  <= _P_.ukid and
-                   _I_.rid = T.id
-            """ % (env["table_name"], prefix)
+        sql +=  """
+                select T.* from %s as P, %s as I, %s as T
+                where  P.v = '%s' and
+                       P.lkid <= I.kid  and
+                       I.kid  <= P.ukid and
+                       I.rid = T.%s
+                """ % (tbl_P, tbl_I, tbl_T, prefix, col_T_id)
     if sql != "":
         cursor = conn.cursor()
         cursor.execute(sql)
+        n = 0
         for row in cursor:
-            print row
+            n += 1
+            #print row
+            if n == 10:
+                break
 
 #
 
 def fuzzy_search(conn, env, query, t):
     #
-    print "\n\"" + query + "\" " + str(t) + ":"
+    tbl_T = env["db_table"]
+    col_T_id = env["db_id_column"]
+    tbl_P = "_" + tbl_T + "_P_"
+    tbl_I = "_" + tbl_T + "_I_"
+    tbl_S = "_" + tbl_T + "_S_"
     #
     sql = ""
     v_wp = split(query)
@@ -46,134 +59,124 @@ def fuzzy_search(conn, env, query, t):
         if sql != "":
             sql += "intersect"
         insert_similar_prefixes(conn, env, wp, m)
-        #dump_table(conn, "_S_", "_S_")
-        sql += """
-            select distinct(_I_.rid) from _S_, _P_, _I_
-            where  _S_.w = '%s' and
-                   _S_.m = %d and
-                   _S_.v = _P_.v and
-                   _P_.lkid <= _I_.kid and
-                   _I_.kid  <= _P_.ukid
-            """ % (wp, m)
+        sql +=  """
+                select T.* from %s as S, %s as P, %s as I, %s as T
+                where  S.w = '%s' and S.m = %d and S.v = P.v and
+                       P.lkid <= I.kid and I.kid <= P.ukid and
+                       I.rid = T.%s
+                """ % (tbl_S, tbl_P, tbl_I, tbl_T, wp, m, col_T_id)
     if sql != "":
         cursor = conn.cursor()
         cursor.execute(sql)
+        n = 0
         for row in cursor:
-            print "  ", row
+            n += 1
+            #print "  ", row
+            if n == 10:
+                break
 
 #
 
 def insert_similar_prefixes(conn, env, wp, m):
     #
-    OPT_INDEX = True
+    tbl_T = env["db_table"]
+    col_T_id = env["db_id_column"]
+    tbl_P = "_" + tbl_T + "_P_"
+    tbl_I = "_" + tbl_T + "_I_"
+    tbl_S = "_" + tbl_T + "_S_"
+    tbl_R = "_" + tbl_T + "_R_"
+    seq = "_SEQ_" + tbl_S + "_ID_"
     #
     cursor = conn.cursor()
     cursor.execute("""
-        select n from _R_ where w = '%s' and m = %d
-        """ % (wp, m))
+            select n from %s as R where w = '%s' and m = %d
+            """ % (tbl_R, wp, m))
     row = cursor.fetchone()
     if row != None:
         return
     if wp == "":
         cursor.execute("""
-            insert into _S_ (w, m, v, d, p, i)
-            select "", %d, v, length(v), 3, 1
-            from _P_ where length(v) <= %d
-            """ % (m, m))
+                insert into %s (id, w, m, v, d, p, i)
+                select %s.nextval, '', %d, v, length(v), 3, 1
+                from %s where length(v) <= %d
+                """ % (tbl_S, seq, m, tbl_P, m))
         cursor.execute("""
-            insert into _R_
-            select '', %d, count(*) from _S_
-            """ % m)
+                insert into %s
+                select '', %d, count(*) from %s
+                """ % (tbl_R, m, tbl_S))
         return
     #
     w = wp[:-1]
     c = wp[-1]
     insert_similar_prefixes(conn, env, w, m)
     #
-    # Deletion
+    # Deletion.
     #
     conn.execute("""
-        insert into _S_ (w, m, v, d, p, i)
-        select '%s', %d, v, d + 1, 1, 0 from _S_
-        where  w = '%s' and d < %d and m = %d
-        """ % (wp, m, w, m, m))
+            insert into %s (id, w, m, v, d, p, i)
+            select %s.nextval, '%s', %d, v, d + 1, 1, 0 from %s
+            where  w = '%s' and d < %d and m = %d
+            """ % (tbl_S, seq, wp, m, tbl_S, w, m, m))
     #
-    # Match
+    # Match.
     #
     conn.execute("""
-        insert into _S_ (w, m, v, d, p, i)
-        select '%s', %d, _P_.v, d, 2, 0 from _S_, _P_
-        where  _S_.w = '%s' and _S_.m = %d and
-               _P_.v = (_S_.v || '%s')
-        """ % (wp, m, w, m, c))
+            insert into %s (id, w, m, v, d, p, i)
+            select %s.nextval, '%s', %d, P.v, d, 2, 0
+            from %s as S, %s as P
+            where  S.w = '%s' and S.m = %d and
+                   P.v = (S.v || '%s')
+            """ % (tbl_S, seq, wp, m, tbl_S, tbl_P, w, m, c))
     #
-    # Insertion
+    # Insertion.
     #
-    if OPT_INDEX == True:
-        for i in range(0, m):
-            p = 2 if i == 0 else 3
-            cursor.execute("""
-                insert into _S_ (w, m, v, d, p, i)
-                select _S_.w, _S_.m, _P_.v, _S_.d + 1, 3, _S_.i + 1
-                from   _S_, _P_
-                where  _S_.w = '%s' and _S_.m = %d and
-                       _S_.v = _P_.h and _S_.d < _S_.m and
-                       _S_.p = %d and _S_.i = %d
-            """ % (wp, m, p, i))
-    else:
+    for i in range(0, m):
+        p = 2 if i == 0 else 3
         cursor.execute("""
-            insert into _S_ (w, m, v, d, p, i)
-            select '%s', %d, _P_.v,
-                   length(_P_.v) - length(_S_.v) - 1 + d, 3, 0
-            from   _S_, _P_
-            where  _S_.w = '%s' and _S_.m = %d and
-                   length(_P_.v) > length(_S_.v) + 1 and
-                   substr(_P_.v, 1, length(_S_.v) + 1) = (_S_.v || '%s') and
-                   _S_.d + length(_P_.v) - length(_S_.v) - 1 <= %d
-            """ % (wp, m, w, m, c, m))
+                insert into %s (id, w, m, v, d, p, i)
+                select %s.nextval, S.w, S.m, P.v, S.d + 1, 3, S.i + 1
+                from   %s as S, %s as P
+                where  S.w = '%s' and S.m = %d and
+                       S.v = P.h and S.d < S.m and
+                       S.p = %d and S.i = %d
+                """ % (tbl_S, seq, tbl_S, tbl_P, wp, m, p, i))
     #
-    # Substitution
-    #
-    if OPT_INDEX == True:
-        cursor.execute("""
-            insert into _S_ (w, m, v, d, p, i)
-            select '%s', %d, _P_.v, d + 1, 4, 0 from _S_, _P_
-            where  _S_.w = '%s' and _S_.m = %d and
-                   _P_.v <> (_S_.v || '%s') and
-                   _P_.h = _S_.v and
-                   _S_.d < %d
-            """ % (wp, m, w, m, c, m))
-    else:
-        cursor.execute("""
-            insert into _S_ (w, m, v, d, p, i)
-            select '%s', %d, _P_.v, d + 1, 4, 0 from _S_, _P_
-            where  _S_.w = '%s' and _S_.m = %d and
-                   _P_.v <> (_S_.v || '%s') and
-                   substr(_P_.v, 1, length(_P_.v) - 1) = _S_.v and
-                   _S_.d < %d
-            """ % (wp, m, w, m, c, m))
-    #
-    # Remove duplicates
+    # Substitution.
     #
     cursor.execute("""
-        delete from _S_
-        where id in (
-            select S1.id from _S_ as S1
-            inner join _S_ as S2
-            on S1.w = S2.w and S1.v = S2.v and
-               S1.m = S2.m and S1.d > S2.d)
-        """)
+            insert into %s (id, w, m, v, d, p, i)
+            select %s.nextval, '%s', %d, P.v, d + 1, 4, 0
+            from   %s as S, %s as P
+            where  S.w = '%s' and S.m = %d and
+                   P.v <> (S.v || '%s') and
+                   P.h = S.v and S.d < %d
+            """ % (tbl_S, seq, wp, m, tbl_S, tbl_P, w, m, c, m))
     #
-    # Insert count of entries of <wp, m> in S into R
+    # Remove incorrect entries in 'S'.
     #
     cursor.execute("""
-        insert into _R_
-        select w, m, count(*) from _S_
-        where w = '%s' and m = %d
-        """ % (wp, m))
+            delete from %s
+            where id in (
+                select S1.id from %s as S1
+                inner join %s as S2
+                on S1.w = S2.w and S1.v = S2.v and
+                   S1.m = S2.m and S1.d > S2.d)
+            """ % (tbl_S, tbl_S, tbl_S))
+    #
+    # Insert count of entries of <wp, m> in S into R.
+    #
+    cursor.execute("""
+            insert into %s
+            select '%s', %d, count(*) from %s
+            where w = '%s' and m = %d
+            """ % (tbl_R, wp, m, tbl_S, wp, m))
+    #
+    # Commit.
     #
     conn.commit()
 
+#
+##
 #
 
 def split(s):
@@ -188,48 +191,63 @@ def clean(s):
     return re.sub(r"[^\w]+", "", s)
 
 #
+##
+#
+
+def test_exact_search(conn, env, query):
+    #
+    query = query.strip()
+    for i in range(0, len(query)):
+        q = query[:(i + 1)]
+        start_time = time.time()
+        print ">>>> '%s'" % q
+        exact_search(conn, env, q)
+        print "     " + str(time.time() - start_time)
+
+#
+
+def test_fuzzy_search(conn, env, query, t):
+    #
+    query = query.strip()
+    for i in range(0, len(query)):
+        q = query[:(i + 1)]
+        start_time = time.time()
+        print ">>>> '%s'" % q
+        fuzzy_search(conn, env, q, t)
+        print "     " + str(time.time() - start_time)
+
+#
+##
+#
 
 if __name__ == "__main__":
     #
     env = {
-        "dsn":               "hana2",
-        "username":          "HPC",
-        "password":          "Initial1234",
-        "database":          "HPC",
-        "table_name":        "DBLP",
-        "column_name_id":    "ID",
-        "column_name_index": "TITLE"}
+        "name":         "DBLP",
+        "db_dsn":       "hana2",
+        "db_username":  "HPC",
+        "db_password":  "Initial1234",
+        "db_schema":    "HPC",
+        "db_table":     "DBLP",
+        "db_id_column": "ID",
+        "db_content_column": "TITLE"}
     #
     conn = pyodbc.connect("DSN=%s;UID=%s;PWD=%s" \
-           % (env["dsn"], env["username"], env["password"]),
+           % (env["db_dsn"], env["db_username"], env["db_password"]),
               autocommit=False)
     #
     # Test exact search
     #
-    start_time = time.time()
-    print ">>>> 'd'"
-    exact_search(conn, env, "d")
-    print ">>>> 'da'"
-    exact_search(conn, env, "da")
-    print ">>>> 'dat '"
-    exact_search(conn, env, "dat")
-    print ">>>> 'dat m'"
-    exact_search(conn, env, "dat m")
-    print ">>>> 'dat mi'"
-    exact_search(conn, env, "dat mi")
-    print "Done. " + str(time.time() - start_time)
+    #test_exact_search(conn, env, "dat mi")
+    #test_exact_search(conn, env, "mi dat")
+    test_exact_search(conn, env, "determin")
     #
     # Test fuzzy search
     #
-    '''
-    fuzzy_search(conn, env, "a", 0.4)
-    fuzzy_search(conn, env, "ap", 0.4)
-    fuzzy_search(conn, env, "apu", 0.4)
-    fuzzy_search(conn, env, "apul", 0.4)
-    fuzzy_search(conn, env, "apul c", 0.4)
-    fuzzy_search(conn, env, "apul cr", 0.4)
-    fuzzy_search(conn, env, "apul cre", 0.4)
-    '''
+    #test_fuzzy_search(conn, env, "date", 0.3)
+    test_fuzzy_search(conn, env, "determin", 0.3)
+    #test_fuzzy_search(conn, env, "date mi", 0.3)
+    #test_fuzzy_search(conn, env, "mi dat", 0.3)
     #
     conn.close()
 
