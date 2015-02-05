@@ -1,5 +1,5 @@
 #
-# Hao, created: 01/29/2015, modified: 02/04/2015
+# Hao, created: 01/29/2015, modified: 02/05/2015
 #
 
 import re
@@ -112,7 +112,7 @@ def insert_similar_prefixes(conn, env, wp, m):
     #
     # Deletion.
     #
-    conn.execute("""
+    cursor.execute("""
             insert into %s (id, w, m, v, d, p, i)
             select %s.nextval, '%s', %d, v, d + 1, 1, 0 from %s
             where  w = '%s' and d < %d and m = %d
@@ -120,12 +120,12 @@ def insert_similar_prefixes(conn, env, wp, m):
     #
     # Match.
     #
-    conn.execute("""
+    cursor.execute("""
             insert into %s (id, w, m, v, d, p, i)
             select %s.nextval, '%s', %d, P.v, d, 2, 0
             from %s as S, %s as P
             where  S.w = '%s' and S.m = %d and
-                   P.v = (S.v || '%s')
+                   P.v = concat(S.v, '%s')
             """ % (tbl_S, seq, wp, m, tbl_S, tbl_P, w, m, c))
     #
     # Insertion.
@@ -148,7 +148,7 @@ def insert_similar_prefixes(conn, env, wp, m):
             select %s.nextval, '%s', %d, P.v, d + 1, 4, 0
             from   %s as S, %s as P
             where  S.w = '%s' and S.m = %d and
-                   P.v <> (S.v || '%s') and
+                   P.v <> concat(S.v, '%s') and
                    P.h = S.v and S.d < %d
             """ % (tbl_S, seq, wp, m, tbl_S, tbl_P, w, m, c, m))
     #
